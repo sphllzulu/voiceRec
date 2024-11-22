@@ -15,6 +15,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Font from "expo-font";
 import * as Sharing from "expo-sharing";
 import { MaterialIcons } from "@expo/vector-icons";
+import { addDoc, collection } from "firebase/firestore";
+import { query, where, getDocs } from "firebase/firestore";
+import { auth, db } from "../../config/firebaseConfig";
+// import { styles } from "../../styles";
+
 
 export default function AudioRecording() {
   const [recording, setRecording] = useState();
@@ -31,6 +36,8 @@ export default function AudioRecording() {
     loadFonts();
   }, []);
 
+  
+
   useEffect(() => {
     Animated.timing(slideAnim, {
       toValue: showFeedback ? 1 : 0,
@@ -46,16 +53,48 @@ export default function AudioRecording() {
     setFontsLoaded(true);
   }
 
+  async function saveRecordings(updatedRecordings) {
+    try {
+      await AsyncStorage.setItem(
+        "recordings",
+        JSON.stringify(updatedRecordings)
+      );
+      setRecordings(updatedRecordings);
+    } catch (error) {
+      console.error("Failed to save recordings:", error);
+    }
+  }
+
+  //cloud storage instead of async implemented
   async function loadRecordings() {
     try {
-      const savedRecordings = await AsyncStorage.getItem("recordings");
-      if (savedRecordings !== null) {
-        setRecordings(JSON.parse(savedRecordings));
+      const q = query(
+        collection(db, "recordings"),
+        where("uid", "==", auth.currentUser.uid)
+      );
+      const querySnapshot = await getDocs(q);
+  
+      const userRecordings = [];
+      for (const doc of querySnapshot.docs) {
+        const data = doc.data();
+        const sound = new Audio.Sound();
+  
+        // Load the sound URI into the Audio.Sound instance
+        await sound.loadAsync({ uri: data.sound });
+        
+        userRecordings.push({
+          ...data,
+          sound, // Attach the loaded sound instance
+          isPlaying: false,
+        });
       }
+  
+      setRecordings(userRecordings);
     } catch (error) {
       console.error("Failed to load recordings:", error);
     }
   }
+  
 
   async function saveRecordings(updatedRecordings) {
     try {
@@ -143,24 +182,29 @@ export default function AudioRecording() {
       setRecording(undefined);
       setIsPaused(false);
       await recording.stopAndUnloadAsync();
-
+  
       const { sound, status } = await recording.createNewLoadedSoundAsync();
       const newRecording = {
-        sound,
+        sound, // Store the Audio.Sound instance directly
+        uri: recording.getURI(),
         duration: getDurationFormatted(status.durationMillis),
-        file: recording.getURI(),
         date: new Date().toLocaleDateString(),
         time: new Date().toLocaleTimeString(),
-        isPlaying: false,
+        uid: auth.currentUser.uid,
+        isPlaying: false, 
       };
-
+  
       const updatedRecordings = [...recordings, newRecording];
-      saveRecordings(updatedRecordings);
+      setRecordings(updatedRecordings);
+      await addDoc(collection(db, "recordings"), {
+        ...newRecording,
+        sound: newRecording.uri, 
+      });
     } catch (err) {
       console.error("Failed to stop recording", err);
     }
   }
-
+  
   //display the recordings
   function getRecordingLines() {
     const filteredRecordings = getFilteredRecordings();
@@ -171,7 +215,7 @@ export default function AudioRecording() {
           {" "}
           <Text style={styles.recordingText}>
             {" "}
-            {`Recording #${originalIndex + 1} | ${recordingLine.duration}`}{" "}
+            <Text>{`Recording #${index + 1} | ${recordingLine.duration}`}</Text>
           </Text>{" "}
           <Text
             style={styles.dateText}
@@ -352,174 +396,419 @@ export default function AudioRecording() {
   );
 }
 
+// const styles = StyleSheet.create({
+//   mainContainer: {
+//     flex: 1,
+//     backgroundColor: "#000000",
+//   },
+//   container: {
+//     padding: 20,
+//     paddingBottom: 100,
+//   },
+//   header: {
+//     fontSize: 24,
+//     fontWeight: "bold",
+//     textAlign: "center",
+//     marginVertical: 20,
+//     color: "#fff",
+//     fontFamily: "Outfit",
+//   },
+//   searchBar: {
+//     height: 40,
+//     borderWidth: 1,
+//     borderColor: "#ddd",
+//     borderRadius: 8,
+//     paddingHorizontal: 10,
+//     marginBottom: 15,
+//     fontFamily: "Outfit",
+//     backgroundColor: "#f5f5f5",
+//   },
+//   recordingRow: {
+//     backgroundColor: "rgba(255, 255, 255, 0.1)",
+//     padding: 15,
+//     marginVertical: 8,
+//     borderRadius: 8,
+//   },
+//   recordingText: {
+//     fontSize: 16,
+//     fontWeight: "bold",
+//     color: "#fff",
+//     fontFamily: "Outfit",
+//   },
+//   dateText: {
+//     fontSize: 14,
+//     color: "#aaa",
+//     fontFamily: "Outfit",
+//   },
+//   buttonContainer: {
+//     flexDirection: "row",
+//     justifyContent: "flex-end",
+//     marginTop: 10,
+//     gap: 10,
+//   },
+//   playButton: {
+//     backgroundColor: "#4caf50",
+//     padding: 8,
+//     borderRadius: 20,
+//   },
+//   deleteButton: {
+//     backgroundColor: "#f44336",
+//     padding: 8,
+//     borderRadius: 20,
+//   },
+//   bottomContainer: {
+//     position: "absolute",
+//     bottom: 0,
+//     left: 0,
+//     right: 0,
+//     flexDirection: "row",
+//     justifyContent: "center",
+//     alignItems: "center",
+//     paddingVertical: 20,
+//     paddingHorizontal: 20,
+//     backgroundColor: "rgba(0,0,0,0.8)",
+//   },
+//   recordButton: {
+//     backgroundColor: "#4caf50",
+//     width: 50,
+//     height: 50,
+//     borderRadius: 32,
+//     justifyContent: "center",
+//     alignItems: "center",
+//   },
+//   recordingActive: {
+//     backgroundColor: "#f44336",
+//   },
+//   pauseButton: {
+//     backgroundColor: "#2196f3",
+//     width: 48,
+//     height: 48,
+//     borderRadius: 24,
+//     justifyContent: "center",
+//     alignItems: "center",
+//     position: "absolute",
+//     right: 20,
+//   },
+//   feedbackButton: {
+//     backgroundColor: "#9c27b0",
+//     width: 48,
+//     height: 48,
+//     borderRadius: 24,
+//     justifyContent: "center",
+//     alignItems: "center",
+//     position: "absolute",
+//     left: 20,
+//   },
+//   shareButton: {
+//     marginLeft: 10,
+//     backgroundColor: "#4285F4",
+//     padding: 10,
+//     borderRadius: "50%",
+//   },
+//   feedbackContainer: {
+//     position: "absolute",
+//     bottom: 0,
+//     left: 0,
+//     right: 0,
+//     backgroundColor: "#fff",
+//     borderTopLeftRadius: 20,
+//     borderTopRightRadius: 20,
+//     padding: 20,
+//     shadowColor: "#000",
+//     shadowOffset: {
+//       width: 0,
+//       height: -2,
+//     },
+//     shadowOpacity: 0.25,
+//     shadowRadius: 3.84,
+//     elevation: 5,
+//   },
+//   feedbackHeader: {
+//     flexDirection: "row",
+//     justifyContent: "space-between",
+//     alignItems: "center",
+//     marginBottom: 15,
+//   },
+//   feedbackTitle: {
+//     fontSize: 20,
+//     fontWeight: "bold",
+//     fontFamily: "Outfit",
+//   },
+//   closeButton: {
+//     padding: 5,
+//   },
+//   feedbackInput: {
+//     borderWidth: 1,
+//     borderColor: "#ddd",
+//     borderRadius: 8,
+//     padding: 10,
+//     marginBottom: 15,
+//     fontFamily: "Outfit",
+//     height: 100,
+//     textAlignVertical: "top",
+//   },
+//   submitButton: {
+//     backgroundColor: "#9c27b0",
+//     padding: 12,
+//     borderRadius: 8,
+//     alignItems: "center",
+//   },
+//   submitButtonText: {
+//     color: "#fff",
+//     fontSize: 16,
+//     fontFamily: "Outfit",
+//     fontWeight: "bold",
+//   },
+//   supportText: {
+//     fontSize: 14,
+//     color: "#666",
+//     fontFamily: "Outfit",
+//     marginTop: 15,
+//     textAlign: "center",
+//   },
+// });
+const COLORS = {
+  primary: '#8B5CF6', // Main purple
+  primaryDark: '#7C3AED', // Darker purple for hover/active states
+  primaryLight: '#A78BFA', // Lighter purple for accents
+  secondary: '#4C1D95', // Deep purple for contrast
+  background: '#1E1B4B', // Dark navy background
+  surface: '#2D2A4A', // Slightly lighter surface color
+  error: '#EF4444', // Red for delete/errors
+  success: '#10B981', // Green for success states
+  text: {
+    primary: '#FFFFFF',
+    secondary: '#E5E7EB',
+    muted: '#9CA3AF',
+  },
+  overlay: 'rgba(17, 24, 39, 0.7)', // Dark overlay for bottom bar
+};
+
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
-    backgroundColor: "#000000",
+    backgroundColor: COLORS.background,
   },
   container: {
     padding: 20,
     paddingBottom: 100,
   },
   header: {
-    fontSize: 24,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginVertical: 20,
-    color: "#fff",
-    fontFamily: "Outfit",
+    fontSize: 32,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginVertical: 24,
+    color: COLORS.text.primary,
+    fontFamily: 'Outfit',
+    letterSpacing: 1,
   },
   searchBar: {
-    height: 40,
+    height: 48,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    fontFamily: 'Outfit',
+    color: COLORS.text.primary,
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    marginBottom: 15,
-    fontFamily: "Outfit",
-    backgroundColor: "#f5f5f5",
+    borderColor: COLORS.primaryLight + '40',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   recordingRow: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    padding: 15,
+    backgroundColor: COLORS.surface,
+    padding: 16,
     marginVertical: 8,
-    borderRadius: 8,
+    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   recordingText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-    fontFamily: "Outfit",
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    fontFamily: 'Outfit',
+    marginBottom: 4,
   },
   dateText: {
     fontSize: 14,
-    color: "#aaa",
-    fontFamily: "Outfit",
+    color: COLORS.text.muted,
+    fontFamily: 'Outfit',
+    marginBottom: 12,
   },
   buttonContainer: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 10,
-    gap: 10,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 12,
+    gap: 12,
   },
   playButton: {
-    backgroundColor: "#4caf50",
-    padding: 8,
-    borderRadius: 20,
+    backgroundColor: COLORS.primary,
+    padding: 10,
+    borderRadius: 12,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   deleteButton: {
-    backgroundColor: "#f44336",
-    padding: 8,
-    borderRadius: 20,
-  },
-  bottomContainer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    backgroundColor: "rgba(0,0,0,0.8)",
-  },
-  recordButton: {
-    backgroundColor: "#4caf50",
-    width: 50,
-    height: 50,
-    borderRadius: 32,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  recordingActive: {
-    backgroundColor: "#f44336",
-  },
-  pauseButton: {
-    backgroundColor: "#2196f3",
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    position: "absolute",
-    right: 20,
-  },
-  feedbackButton: {
-    backgroundColor: "#9c27b0",
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    position: "absolute",
-    left: 20,
+    backgroundColor: COLORS.error,
+    padding: 10,
+    borderRadius: 12,
+    shadowColor: COLORS.error,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   shareButton: {
-    marginLeft: 10,
-    backgroundColor: "#4285F4",
+    backgroundColor: COLORS.primaryLight,
     padding: 10,
-    borderRadius: '50%',
+    borderRadius: 12,
+    shadowColor: COLORS.primaryLight,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  feedbackContainer: {
-    position: "absolute",
+  bottomContainer: {
+    position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: -2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    backgroundColor: COLORS.overlay,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.primaryLight + '20',
+    backdropFilter: 'blur(12px)',
+  },
+  recordButton: {
+    backgroundColor: COLORS.primary,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
     elevation: 5,
   },
+  recordingActive: {
+    backgroundColor: COLORS.error,
+  },
+  pauseButton: {
+    backgroundColor: COLORS.primaryLight,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'absolute',
+    right: 20,
+    shadowColor: COLORS.primaryLight,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  feedbackButton: {
+    backgroundColor: COLORS.secondary,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'absolute',
+    left: 20,
+    shadowColor: COLORS.secondary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  feedbackContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    shadowColor: COLORS.primary,
+    shadowOffset: {
+      width: 0,
+      height: -4,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 8,
+  },
   feedbackHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 15,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   feedbackTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    fontFamily: "Outfit",
+    fontSize: 24,
+    fontWeight: '700',
+    fontFamily: 'Outfit',
+    color: COLORS.text.primary,
   },
   closeButton: {
-    padding: 5,
+    padding: 8,
   },
   feedbackInput: {
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 15,
-    fontFamily: "Outfit",
-    height: 100,
-    textAlignVertical: "top",
+    borderColor: COLORS.primaryLight + '40',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    fontFamily: 'Outfit',
+    height: 120,
+    textAlignVertical: 'top',
+    backgroundColor: COLORS.background,
+    color: COLORS.text.primary,
   },
   submitButton: {
-    backgroundColor: "#9c27b0",
-    padding: 12,
-    borderRadius: 8,
-    alignItems: "center",
+    backgroundColor: COLORS.primary,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   submitButtonText: {
-    color: "#fff",
+    color: COLORS.text.primary,
     fontSize: 16,
-    fontFamily: "Outfit",
-    fontWeight: "bold",
+    fontFamily: 'Outfit',
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
   supportText: {
     fontSize: 14,
-    color: "#666",
-    fontFamily: "Outfit",
-    marginTop: 15,
-    textAlign: "center",
+    color: COLORS.text.muted,
+    fontFamily: 'Outfit',
+    marginTop: 20,
+    textAlign: 'center',
   },
 });
