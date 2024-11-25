@@ -1,21 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  SafeAreaView, 
-  Dimensions, 
-  Image, 
-  Alert, 
-  KeyboardAvoidingView, 
-  Platform 
-} from 'react-native';
-import { auth, db } from '../../config/firebaseConfig';
-import { updateEmail, updatePassword, signOut } from 'firebase/auth';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, Dimensions, Image, Alert, KeyboardAvoidingView, Platform,ActivityIndicator } from 'react-native';
+import { auth, db} from '../../config/firebaseConfig';
+import { updateEmail, updatePassword, signOut, sendEmailVerification,reauthenticateWithCredential,EmailAuthProvider } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+// import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -35,54 +23,40 @@ const COLORS = {
 };
 
 export default function ProfileScreen({ navigation }) {
-  const [email, setEmail] = useState(auth.currentUser.email);
+  const [email, setEmail] = useState(auth.currentUser?.email || '');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [notifications, setNotifications] = useState(false);
   const [imageUri, setImageUri] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     loadUserData();
+    (async () => {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Sorry, we need camera roll permissions to make this work!');
+      }
+    })();
   }, []);
 
   const loadUserData = async () => {
-    const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-    if (userDoc.exists()) {
-      const userData = userDoc.data();
-      setUsername(userData.username || '');
-      setNotifications(userData.notifications || false);
-      setImageUri(userData.imageUri || '');
-    }
-  };
-
-  const handleSave = async () => {
     try {
-      await updateEmail(auth.currentUser, email);
-      if (password) {
-        await updatePassword(auth.currentUser, password);
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setUsername(userData.username || '');
+        setNotifications(userData.notifications || false);
+        setImageUri(userData.photoURL || null);
       }
-      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-        username,
-        email,
-        notifications,
-        imageUri,
-      });
-      await AsyncStorage.setItem('profileImage', imageUri);
-      Alert.alert('Profile updated successfully');
     } catch (error) {
-      console.error(error);
-      Alert.alert('Failed to update profile');
+      console.error('Error loading user data:', error);
+      Alert.alert('Error', 'Failed to load user data');
     }
   };
-
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-      navigation.navigate('Login');
-    } catch (error) {
-      console.error(error);
-    }
-  };
+  
 
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -91,10 +65,78 @@ export default function ProfileScreen({ navigation }) {
       aspect: [4, 3],
       quality: 1,
     });
-
+  
     if (!result.canceled) {
       const { uri } = result.assets[0];
       setImageUri(uri);
+    }
+  };
+
+  
+  const reauthenticate = async () => {
+    if (!currentPassword) {
+      throw new Error('Current password is required');
+    }
+    const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+    await reauthenticateWithCredential(auth.currentUser, credential);
+  };
+
+  const handleSave = async () => {
+    if (loading) return;
+    
+    setLoading(true);
+    try {
+      // If email is being changed
+      if (email !== auth.currentUser.email) {
+        await reauthenticate();
+        await updateEmail(auth.currentUser, email);
+        await sendEmailVerification(auth.currentUser);
+        Alert.alert(
+          'Verification Required',
+          'Please check your email to verify your new email address'
+        );
+      }
+
+      // If password is being changed
+      if (password) {
+        await reauthenticate();
+        await updatePassword(auth.currentUser, password);
+      }
+
+      // Update user document
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        username,
+        email,
+        notifications,
+        updatedAt: new Date().toISOString()
+      });
+
+      Alert.alert('Success', 'Profile updated successfully');
+      setPassword('');
+      setCurrentPassword('');
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to update profile'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  //signout logic
+  const handleSignOut = async () => {
+    try {
+      await AsyncStorage.clear();
+      await signOut(auth);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    } catch (error) {
+      console.error('Error signing out:', error);
+      Alert.alert('Error', 'Failed to sign out');
     }
   };
 
@@ -104,26 +146,31 @@ export default function ProfileScreen({ navigation }) {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <MaterialIcons name="arrow-back" size={24} color={COLORS.text.primary} />
-        </TouchableOpacity>
-
         <View style={styles.headerContainer}>
-          <Text style={styles.headerTitle}>Profile</Text>
+          
         </View>
 
         <View style={styles.formContainer}>
-          {imageUri ? (
-            <Image source={{ uri: imageUri }} style={styles.profileImage} />
-          ) : (
-            <Text style={styles.noImageText}>No profile image</Text>
-          )}
-          <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
-            <Text style={styles.uploadButtonText}>Upload Profile Image</Text>
-          </TouchableOpacity>
+          <View style={styles.imageContainer}>
+            {uploadingImage ? (
+              <ActivityIndicator size="large" color={COLORS.primary} />
+            ) : imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.profileImage} />
+            ) : (
+              <View style={[styles.profileImage, styles.placeholderImage]}>
+                <MaterialIcons name="person" size={40} color={COLORS.text.muted} />
+              </View>
+            )}
+            <TouchableOpacity 
+              style={[styles.uploadButton, uploadingImage && styles.disabledButton]} 
+              onPress={pickImage}
+              disabled={uploadingImage}
+            >
+              <Text style={styles.uploadButtonText}>
+                {uploadingImage ? 'Uploading...' : 'Change Photo'}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.inputContainer}>
             <MaterialIcons name="email" size={20} color={COLORS.primaryLight} style={styles.inputIcon} />
@@ -135,6 +182,7 @@ export default function ProfileScreen({ navigation }) {
               style={styles.input}
               autoCapitalize="none"
               keyboardType="email-address"
+              editable={!loading}
             />
           </View>
 
@@ -146,39 +194,55 @@ export default function ProfileScreen({ navigation }) {
               onChangeText={setUsername}
               value={username}
               style={styles.input}
+              editable={!loading}
             />
           </View>
+
+          {(email !== auth.currentUser?.email || password) && (
+            <View style={styles.inputContainer}>
+              <MaterialIcons name="lock" size={20} color={COLORS.primaryLight} style={styles.inputIcon} />
+              <TextInput
+                placeholder="Current Password"
+                placeholderTextColor={COLORS.text.muted}
+                secureTextEntry
+                onChangeText={setCurrentPassword}
+                value={currentPassword}
+                style={styles.input}
+                editable={!loading}
+              />
+            </View>
+          )}
 
           <View style={styles.inputContainer}>
             <MaterialIcons name="lock" size={20} color={COLORS.primaryLight} style={styles.inputIcon} />
             <TextInput
-              placeholder="Password"
+              placeholder="New Password (optional)"
               placeholderTextColor={COLORS.text.muted}
               secureTextEntry
               onChangeText={setPassword}
               value={password}
               style={styles.input}
+              editable={!loading}
             />
           </View>
 
-          <Text style={styles.notificationLabel}>Notifications</Text>
-          <TouchableOpacity
-            style={[
-              styles.notificationButton,
-              notifications ? styles.notificationEnabled : styles.notificationDisabled,
-            ]}
-            onPress={() => setNotifications(!notifications)}
+          <TouchableOpacity 
+            style={[styles.saveButton, loading && styles.disabledButton]} 
+            onPress={handleSave}
+            disabled={loading}
           >
-            <Text style={styles.notificationButtonText}>
-              {notifications ? "Disable Notifications" : "Enable Notifications"}
-            </Text>
+            {loading ? (
+              <ActivityIndicator color={COLORS.text.primary} />
+            ) : (
+              <Text style={styles.saveButtonText}>Save Changes</Text>
+            )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <Text style={styles.saveButtonText}>Save</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+          <TouchableOpacity 
+            style={styles.signOutButton} 
+            onPress={handleSignOut}
+            disabled={loading}
+          >
             <Text style={styles.signOutButtonText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
@@ -195,27 +259,34 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
-  backButton: {
-    position: 'absolute',
-    top: 20,
-    left: 20,
-    zIndex: 1,
-    padding: 8,
-  },
   headerContainer: {
     alignItems: 'center',
-    marginTop: Dimensions.get('window').height * 0.1,
-    marginBottom: 40,
+    marginTop: Dimensions.get('window').height * 0.05,
+    marginBottom: 20,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
     color: COLORS.text.primary,
     fontFamily: 'Outfit',
-    marginBottom: 8,
   },
   formContainer: {
     paddingHorizontal: 24,
+  },
+  imageContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginBottom: 16,
+  },
+  placeholderImage: {
+    backgroundColor: COLORS.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -242,59 +313,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     paddingRight: 12,
   },
-  profileImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  noImageText: {
-    color: COLORS.text.muted,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
   uploadButton: {
     backgroundColor: COLORS.primary,
-    padding: 10,
-    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
     alignItems: 'center',
-    marginBottom: 20,
   },
   uploadButtonText: {
     color: COLORS.text.primary,
-    fontSize: 16,
-    fontFamily: 'Outfit',
-  },
-  notificationLabel: {
-    color: COLORS.text.muted,
     fontSize: 14,
-    marginLeft: 12,
-    marginBottom: 8,
-  },
-  notificationButton: {
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  notificationEnabled: {
-    backgroundColor: COLORS.primary,
-  },
-  notificationDisabled: {
-    backgroundColor: COLORS.secondary,
-  },
-  notificationButtonText: {
-    color: COLORS.text.primary,
-    fontSize: 16,
     fontFamily: 'Outfit',
+    fontWeight: '500',
   },
   saveButton: {
     backgroundColor: COLORS.primary,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 5,
   },
   saveButtonText: {
     color: COLORS.text.primary,
@@ -303,10 +345,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Outfit',
   },
   signOutButton: {
-    backgroundColor: COLORS.secondary,
+    backgroundColor: COLORS.surface,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primaryLight + '40',
   },
   signOutButtonText: {
     color: COLORS.text.primary,
@@ -314,4 +358,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: 'Outfit',
   },
+  disabledButton: {
+    opacity: 0.7,
+  },
 });
+
+
+
+
+
+
+
+
+
+
