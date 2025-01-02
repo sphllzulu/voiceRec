@@ -1,25 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, Dimensions, Image, Alert, KeyboardAvoidingView, Platform,ActivityIndicator } from 'react-native';
-import { auth, db} from '../../config/firebaseConfig';
-import { updateEmail, updatePassword, signOut, sendEmailVerification,reauthenticateWithCredential,EmailAuthProvider } from 'firebase/auth';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  SafeAreaView,
+  Dimensions,
+  Image,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Modal,
+  ScrollView,
+} from 'react-native';
+import { auth, db } from '../../config/firebaseConfig';
+import { updateEmail, updatePassword, signOut, sendEmailVerification, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-// import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 
 const COLORS = {
-  primary: '#8B5CF6', 
-  primaryDark: '#7C3AED', 
-  primaryLight: '#A78BFA', 
-  secondary: '#4C1D95', 
-  background: '#1E1B4B', 
-  surface: '#2D2A4A', 
+  primary: '#8B5CF6',
+  primaryDark: '#7C3AED',
+  primaryLight: '#A78BFA',
+  secondary: '#4C1D95',
+  background: '#1E1B4B',
+  surface: '#2D2A4A',
   text: {
     primary: '#FFFFFF',
     secondary: '#E5E7EB',
     muted: '#9CA3AF',
-  }
+  },
 };
 
 export default function ProfileScreen({ navigation }) {
@@ -28,18 +42,11 @@ export default function ProfileScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [notifications, setNotifications] = useState(false);
-  const [imageUri, setImageUri] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   useEffect(() => {
     loadUserData();
-    (async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Sorry, we need camera roll permissions to make this work!');
-      }
-    })();
   }, []);
 
   const loadUserData = async () => {
@@ -49,30 +56,13 @@ export default function ProfileScreen({ navigation }) {
         const userData = userDoc.data();
         setUsername(userData.username || '');
         setNotifications(userData.notifications || false);
-        setImageUri(userData.photoURL || null);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
       Alert.alert('Error', 'Failed to load user data');
     }
   };
-  
 
-  const pickImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-  
-    if (!result.canceled) {
-      const { uri } = result.assets[0];
-      setImageUri(uri);
-    }
-  };
-
-  
   const reauthenticate = async () => {
     if (!currentPassword) {
       throw new Error('Current password is required');
@@ -83,7 +73,7 @@ export default function ProfileScreen({ navigation }) {
 
   const handleSave = async () => {
     if (loading) return;
-    
+
     setLoading(true);
     try {
       // If email is being changed
@@ -108,7 +98,7 @@ export default function ProfileScreen({ navigation }) {
         username,
         email,
         notifications,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       });
 
       Alert.alert('Success', 'Profile updated successfully');
@@ -116,62 +106,66 @@ export default function ProfileScreen({ navigation }) {
       setCurrentPassword('');
     } catch (error) {
       console.error('Error updating profile:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to update profile'
-      );
+      Alert.alert('Error', error.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
   };
 
-  //signout logic
   const handleSignOut = async () => {
     try {
       await AsyncStorage.clear();
       await signOut(auth);
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
+      navigation.replace('Login');
     } catch (error) {
       console.error('Error signing out:', error);
       Alert.alert('Error', 'Failed to sign out');
     }
   };
 
+  const getInitial = () => {
+    return email ? email[0].toUpperCase() : 'U';
+  };
+
+  const renderTermsOfUse = () => (
+    <Modal visible={showTerms} animationType="slide" transparent={false}>
+      <View style={styles.termsContainer}>
+        <ScrollView>
+          <Text style={styles.termsTitle}>Terms of Use</Text>
+          <Text style={styles.termsText}>
+            Welcome to MicMagic, a voice recording app. By using this app, you agree to the following terms:
+            {'\n\n'}
+            1. **Usage**: MicMagic is intended for personal and non-commercial use only.
+            {'\n\n'}
+            2. **Recording**: You are responsible for the content of your recordings. Do not record or share illegal or harmful content.
+            {'\n\n'}
+            3. **Privacy**: Your recordings are stored securely, but we cannot guarantee absolute security. Use the app at your own risk.
+            {'\n\n'}
+            4. **Prohibited Activities**: Do not use MicMagic for spamming, harassment, or any illegal activities.
+            {'\n\n'}
+            5. **Changes to Terms**: We reserve the right to update these terms at any time. Continued use of the app constitutes acceptance of the updated terms.
+          </Text>
+          <TouchableOpacity style={styles.closeButton} onPress={() => setShowTerms(false)}>
+            <Text style={styles.closeButtonText}>Close</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
         <View style={styles.headerContainer}>
-          
+          <View style={styles.profileImageContainer}>
+            <Text style={styles.profileInitial}>{getInitial()}</Text>
+          </View>
         </View>
 
         <View style={styles.formContainer}>
-          <View style={styles.imageContainer}>
-            {uploadingImage ? (
-              <ActivityIndicator size="large" color={COLORS.primary} />
-            ) : imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.profileImage} />
-            ) : (
-              <View style={[styles.profileImage, styles.placeholderImage]}>
-                <MaterialIcons name="person" size={40} color={COLORS.text.muted} />
-              </View>
-            )}
-            <TouchableOpacity 
-              style={[styles.uploadButton, uploadingImage && styles.disabledButton]} 
-              onPress={pickImage}
-              disabled={uploadingImage}
-            >
-              <Text style={styles.uploadButtonText}>
-                {uploadingImage ? 'Uploading...' : 'Change Photo'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
           <View style={styles.inputContainer}>
             <MaterialIcons name="email" size={20} color={COLORS.primaryLight} style={styles.inputIcon} />
             <TextInput
@@ -226,8 +220,8 @@ export default function ProfileScreen({ navigation }) {
             />
           </View>
 
-          <TouchableOpacity 
-            style={[styles.saveButton, loading && styles.disabledButton]} 
+          <TouchableOpacity
+            style={[styles.saveButton, loading && styles.disabledButton]}
             onPress={handleSave}
             disabled={loading}
           >
@@ -238,15 +232,16 @@ export default function ProfileScreen({ navigation }) {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={styles.signOutButton} 
-            onPress={handleSignOut}
-            disabled={loading}
-          >
+          <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={loading}>
             <Text style={styles.signOutButtonText}>Sign Out</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.termsButton} onPress={() => setShowTerms(true)}>
+            <Text style={styles.termsButtonText}>Terms of Use</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      {renderTermsOfUse()}
     </SafeAreaView>
   );
 }
@@ -264,29 +259,22 @@ const styles = StyleSheet.create({
     marginTop: Dimensions.get('window').height * 0.05,
     marginBottom: 20,
   },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.text.primary,
-    fontFamily: 'Outfit',
-  },
-  formContainer: {
-    paddingHorizontal: 24,
-  },
-  imageContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  profileImage: {
+  profileImageContainer: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    marginBottom: 16,
-  },
-  placeholderImage: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  profileInitial: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: COLORS.text.primary,
+  },
+  formContainer: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -312,19 +300,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Outfit',
     fontSize: 16,
     paddingRight: 12,
-  },
-  uploadButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    alignItems: 'center',
-  },
-  uploadButtonText: {
-    color: COLORS.text.primary,
-    fontSize: 14,
-    fontFamily: 'Outfit',
-    fontWeight: '500',
   },
   saveButton: {
     backgroundColor: COLORS.primary,
@@ -358,17 +333,47 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: 'Outfit',
   },
+  termsButton: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  termsButtonText: {
+    color: COLORS.primaryLight,
+    fontSize: 16,
+    fontFamily: 'Outfit',
+    textDecorationLine: 'underline',
+  },
+  termsContainer: {
+    flex: 1,
+    padding: 24,
+    backgroundColor: COLORS.background,
+  },
+  termsTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.text.primary,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  termsText: {
+    fontSize: 16,
+    color: COLORS.text.primary,
+    lineHeight: 24,
+  },
+  closeButton: {
+    marginTop: 24,
+    backgroundColor: COLORS.primary,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    color: COLORS.text.primary,
+    fontSize: 18,
+    fontWeight: '600',
+    fontFamily: 'Outfit',
+  },
   disabledButton: {
     opacity: 0.7,
   },
 });
-
-
-
-
-
-
-
-
-
-
