@@ -15,8 +15,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Font from "expo-font";
 import * as Sharing from "expo-sharing";
 import { MaterialIcons } from "@expo/vector-icons";
-import { addDoc, collection } from "firebase/firestore";
-import { query, where, getDocs } from "firebase/firestore";
+import { addDoc, collection,updateDoc,doc, query, where, getDocs, deleteDoc } from "firebase/firestore";
+// import { query, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../../config/firebaseConfig";
 
 
@@ -29,7 +29,8 @@ export default function AudioRecording() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
-
+  // const [searchTerm, setSearchTerm] = useState("");
+  const [filteredRecordings, setFilteredRecordings] = useState([]);
   useEffect(() => {
     loadRecordings();
     loadFonts();
@@ -42,6 +43,21 @@ export default function AudioRecording() {
       useNativeDriver: true,
     }).start();
   }, [showFeedback]);
+
+  useEffect(() => {
+    if (!recordings) return;
+    
+    const filtered = recordings.filter((recording) => {
+      const searchString = searchTerm.toLowerCase();
+      return (
+        recording.name?.toLowerCase().includes(searchString) ||
+        recording.date?.toLowerCase().includes(searchString) ||
+        recording.time?.toLowerCase().includes(searchString)
+      );
+    });
+    
+    setFilteredRecordings(filtered);
+  }, [searchTerm, recordings]);
 
   async function loadFonts() {
     await Font.loadAsync({
@@ -59,24 +75,33 @@ export default function AudioRecording() {
       const querySnapshot = await getDocs(q);
   
       const userRecordings = [];
-      for (const doc of querySnapshot.docs) {
-        const data = doc.data();
+      for (const docSnapshot of querySnapshot.docs) {
+        const data = docSnapshot.data();
         const sound = new Audio.Sound();
   
-        await sound.loadAsync({ uri: data.sound });
-        
-        userRecordings.push({
-          ...data,
-          sound,
-          isPlaying: false,
-        });
+        try {
+          await sound.loadAsync({ uri: data.sound });
+          
+          userRecordings.push({
+            ...data,
+            docId: docSnapshot.id, // Store Firestore document ID
+            sound,
+            isPlaying: false,
+          });
+        } catch (error) {
+          console.error("Failed to load sound:", error);
+          // Continue with next recording if one fails to load
+          continue;
+        }
       }
   
       setRecordings(userRecordings);
     } catch (error) {
       console.error("Failed to load recordings:", error);
+      Alert.alert("Error", "Failed to load recordings. Please try again.");
     }
   }
+
 
   async function saveRecordings(updatedRecordings) {
     try {
@@ -122,7 +147,7 @@ export default function AudioRecording() {
     }
   }
 
-  function deleteRecording(index) {
+  async function deleteRecording(index) {
     Alert.alert(
       "Delete Recording",
       "Are you sure you want to delete this recording?",
@@ -131,9 +156,22 @@ export default function AudioRecording() {
         {
           text: "Delete",
           onPress: async () => {
-            const updatedRecordings = [...recordings];
-            updatedRecordings.splice(index, 1);
-            await saveRecordings(updatedRecordings);
+            try {
+              const recordingToDelete = recordings[index];
+              if (!recordingToDelete || !recordingToDelete.docId) {
+                throw new Error("Invalid recording or missing document ID");
+              }
+
+              // Delete from Firestore
+              await deleteDoc(doc(db, "recordings", recordingToDelete.docId));
+
+              // Update local state
+              const updatedRecordings = recordings.filter((_, i) => i !== index);
+              setRecordings(updatedRecordings);
+            } catch (error) {
+              console.error("Failed to delete recording:", error);
+              Alert.alert("Error", "Failed to delete recording. Please try again.");
+            }
           },
         },
       ]
@@ -146,14 +184,13 @@ export default function AudioRecording() {
     return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
   }
 
-  function getFilteredRecordings() {
-    return recordings.filter((recording, index) => {
-      if (!searchTerm) return true;
-      const searchString = searchTerm.toLowerCase();
-      const recordingNumber = `${index + 1}`;
-      return recordingNumber.includes(searchString);
-    });
-  }
+  // function getFilteredRecordings() {
+  //   return recordings.filter((recording) => {
+  //     if (!searchTerm) return true;
+  //     const searchString = searchTerm.toLowerCase();
+  //     return recording.name.toLowerCase().includes(searchString);
+  //   });
+  // }
 
   async function stopRecording() {
     try {
@@ -162,35 +199,82 @@ export default function AudioRecording() {
       await recording.stopAndUnloadAsync();
   
       const { sound, status } = await recording.createNewLoadedSoundAsync();
-      const newRecording = {
-        sound,
-        uri: recording.getURI(),
+      const uri = recording.getURI();
+      
+      const recordingData = {
+        sound: uri,
         duration: getDurationFormatted(status.durationMillis),
         date: new Date().toLocaleDateString(),
         time: new Date().toLocaleTimeString(),
         uid: auth.currentUser.uid,
-        isPlaying: false, 
+        name: `Recording ${recordings.length + 1}`,
       };
   
-      const updatedRecordings = [...recordings, newRecording];
-      setRecordings(updatedRecordings);
-      await addDoc(collection(db, "recordings"), {
-        ...newRecording,
-        sound: newRecording.uri, 
-      });
+      // Add to Firestore first to get the document ID
+      const docRef = await addDoc(collection(db, "recordings"), recordingData);
+      
+      const newRecording = {
+        ...recordingData,
+        docId: docRef.id,
+        sound,
+        isPlaying: false,
+      };
+  
+      setRecordings(prevRecordings => [...prevRecordings, newRecording]);
     } catch (err) {
       console.error("Failed to stop recording", err);
+      Alert.alert("Error", "Failed to save recording. Please try again.");
+    }
+  }
+
+  
+  async function updateRecordingName(index, newName) {
+    try {
+      if (!recordings || !recordings[index]) {
+        console.error("Recording not found at index:", index);
+        return;
+      }
+
+      const recording = recordings[index];
+      if (!recording.docId) {
+        console.error("Recording document ID not found");
+        return;
+      }
+
+      // Update Firestore first
+      const recordingRef = doc(db, "recordings", recording.docId);
+      await updateDoc(recordingRef, {
+        name: newName
+      });
+
+      // If Firestore update succeeds, update local state
+      const updatedRecordings = recordings.map((rec, i) => 
+        i === index ? { ...rec, name: newName } : rec
+      );
+      setRecordings(updatedRecordings);
+    } catch (error) {
+      console.error("Failed to update recording name:", error);
+      Alert.alert("Error", "Failed to update recording name. Please try again.");
     }
   }
 
   function getRecordingLines() {
-    const filteredRecordings = getFilteredRecordings();
+    if (!recordings) return [];
+
+    // Use filteredRecordings instead of filtering inline
     return filteredRecordings.map((recordingLine, index) => {
-      const originalIndex = recordings.indexOf(recordingLine);
+      // Find the original index in the recordings array for correct updating
+      const originalIndex = recordings.findIndex(r => r.docId === recordingLine.docId);
+      
       return (
-        <View key={originalIndex} style={styles.recordingRow}>
+        <View key={recordingLine.docId || index} style={styles.recordingRow}>
           <View style={styles.recordingText}>
-            <Text>{`Recording #${index + 1} | ${recordingLine.duration}`}</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={recordingLine.name || ""}
+              onChangeText={(text) => updateRecordingName(originalIndex, text)}
+            />
+            <Text style={styles.durationText}>{recordingLine.duration}</Text>
           </View>
           <Text style={styles.dateText}>
             {`${recordingLine.date} at ${recordingLine.time}`}
@@ -200,12 +284,14 @@ export default function AudioRecording() {
               style={styles.playButton}
               onPress={() => {
                 if (recordingLine.isPlaying) {
-                  recordingLine.sound.pauseAsync();
+                  recordingLine.sound?.pauseAsync();
                 } else {
-                  recordingLine.sound.replayAsync();
+                  recordingLine.sound?.replayAsync();
                 }
-                recordingLine.isPlaying = !recordingLine.isPlaying;
-                setRecordings([...recordings]);
+                const updatedRecordings = recordings.map((rec, i) => 
+                  i === originalIndex ? { ...rec, isPlaying: !rec.isPlaying } : rec
+                );
+                setRecordings(updatedRecordings);
               }}
             >
               <MaterialIcons
@@ -222,7 +308,7 @@ export default function AudioRecording() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.shareButton}
-              onPress={() => shareRecording(recordingLine.file)}
+              onPress={() => recordingLine.uri && shareRecording(recordingLine.uri)}
             >
               <MaterialIcons name="share" size={24} color="#fff" />
             </TouchableOpacity>
@@ -231,6 +317,7 @@ export default function AudioRecording() {
       );
     });
   }
+
 
   function submitFeedback() {
     if (!feedback.trim()) {
@@ -270,15 +357,20 @@ export default function AudioRecording() {
   return (
     <View style={styles.mainContainer}>
       <ScrollView contentContainerStyle={styles.container}>
-        {/* <Text style={styles.header}>MicMagic</Text> */}
-        {/* <MaterialIcons style={styles.header} name="mic" size={24} color="black" /> */}
-        <TextInput
+        
+      <TextInput
           style={styles.searchBar}
-          placeholder="Search recordings number by date or time..."
+          placeholder="Search by recording name, date, or time..."
+          placeholderTextColor={COLORS.text.muted}
           value={searchTerm}
           onChangeText={setSearchTerm}
         />
         {getRecordingLines()}
+        {filteredRecordings.length === 0 && searchTerm !== "" && (
+          <Text style={styles.noResultsText}>
+            No recordings found matching "{searchTerm}"
+          </Text>
+        )}
       </ScrollView>
 
       <Animated.View
@@ -398,6 +490,15 @@ const styles = StyleSheet.create({
     fontFamily: 'Outfit',
     letterSpacing: 1,
   },
+  nameInput: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    fontFamily: 'Outfit',
+    marginBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.primaryLight,
+  },
   searchBar: {
     height: 48,
     backgroundColor: 'grey',
@@ -484,7 +585,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 24,
+    paddingVertical: 5,
     paddingHorizontal: 20,
     backgroundColor: COLORS.overlay,
     borderTopWidth: 1,
