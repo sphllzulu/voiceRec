@@ -208,6 +208,7 @@ export default function AudioRecording() {
         time: new Date().toLocaleTimeString(),
         uid: auth.currentUser.uid,
         name: `Recording ${recordings.length + 1}`,
+        uri: uri, // Ensure URI is set
       };
   
       // Add to Firestore first to get the document ID
@@ -226,7 +227,6 @@ export default function AudioRecording() {
       Alert.alert("Error", "Failed to save recording. Please try again.");
     }
   }
-
   
   async function updateRecordingName(index, newName) {
     try {
@@ -343,12 +343,16 @@ export default function AudioRecording() {
       ]
     );
   }
-
   async function shareRecording(uri) {
     try {
+      if (!uri) {
+        Alert.alert("Error", "No recording URI found.");
+        return;
+      }
       await Sharing.shareAsync(uri);
     } catch (error) {
       console.error("Failed to share recording:", error);
+      Alert.alert("Error", "Failed to share recording. Please try again.");
     }
   }
 
