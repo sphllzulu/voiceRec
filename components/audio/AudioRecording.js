@@ -31,6 +31,7 @@ export default function AudioRecording() {
   const slideAnim = useRef(new Animated.Value(0)).current;
   // const [searchTerm, setSearchTerm] = useState("");
   const [filteredRecordings, setFilteredRecordings] = useState([]);
+
   useEffect(() => {
     loadRecordings();
     loadFonts();
@@ -68,18 +69,25 @@ export default function AudioRecording() {
 
   async function loadRecordings() {
     try {
+      //creating a firestore query to filter out recordings of the currently logged in user based on the uid
       const q = query(
+        //db is the database instance, recordings is the name of the collection
         collection(db, "recordings"),
+        //uid is the field on the document and its being compared to the authentication uid
         where("uid", "==", auth.currentUser.uid)
       );
+      //the result of the query is being stored on querySnapshot
       const querySnapshot = await getDocs(q);
   
       const userRecordings = [];
+      //looping through all the documents retrieved from firestore
       for (const docSnapshot of querySnapshot.docs) {
+        //returns all the data stored as an object
         const data = docSnapshot.data();
         const sound = new Audio.Sound();
   
         try {
+          //loads the audio file from the uri on the sound field
           await sound.loadAsync({ uri: data.sound });
           
           userRecordings.push({
@@ -94,7 +102,7 @@ export default function AudioRecording() {
           continue;
         }
       }
-  
+      //updated the state with the user's recordings
       setRecordings(userRecordings);
     } catch (error) {
       console.error("Failed to load recordings:", error);
@@ -166,7 +174,8 @@ export default function AudioRecording() {
               await deleteDoc(doc(db, "recordings", recordingToDelete.docId));
 
               // Update local state
-              const updatedRecordings = recordings.filter((_, i) => i !== index);
+              const updatedRecordings = [...recordings]
+              updatedRecordings.splice(index,1)
               setRecordings(updatedRecordings);
             } catch (error) {
               console.error("Failed to delete recording:", error);
@@ -184,13 +193,6 @@ export default function AudioRecording() {
     return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
   }
 
-  // function getFilteredRecordings() {
-  //   return recordings.filter((recording) => {
-  //     if (!searchTerm) return true;
-  //     const searchString = searchTerm.toLowerCase();
-  //     return recording.name.toLowerCase().includes(searchString);
-  //   });
-  // }
 
   async function stopRecording() {
     try {
