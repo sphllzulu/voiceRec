@@ -40,6 +40,9 @@ MicMagic is a user-friendly voice recording app designed for seamless audio reco
 * Expo Permissions for microphone and media access
 * Expo Sharing for recording distribution
 
+## Screenshot
+![Image](https://github.com/user-attachments/assets/e22e4489-541a-47b9-b3d8-ec7cdf01c79a)
+
 ## Installation
 
 ### Prerequisites
